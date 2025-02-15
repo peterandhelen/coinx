@@ -1,5 +1,10 @@
 <template>
   <view class="market-container">
+    <!-- 添加更新延迟显示 -->
+    <view class="update-info" v-if="updateDelay">
+      <text>延迟: {{updateDelay}}s</text>
+    </view>
+    
     <!-- 搜索栏 -->
     <view class="search-bar">
       <input type="text" v-model="searchKey" placeholder="搜索币种" @input="onSearch"/>
@@ -30,7 +35,13 @@
             :key="index" 
             @tap="goToKline(item.symbol)">
         <text class="col symbol">{{formatSymbol(item.symbol)}}</text>
-        <text class="col price">{{formatPrice(item.lastPrice)}}</text>
+        <text class="col price" 
+              :class="{ 
+                'price-up': item.priceUp === true,
+                'price-down': item.priceUp === false
+              }">
+          {{formatPrice(item.lastPrice)}}
+        </text>
         <text class="col change" 
               :class="parseFloat(item.priceChangePercent) >= 0 ? 'up' : 'down'">
           {{formatChange(item.priceChangePercent)}}%
@@ -45,6 +56,8 @@
 
 <script>
 import binanceApi from '@/api/binance.js';
+import BinanceWebSocket from '@/api/websocket.js';
+import formatter from '@/utils/formatter.js';
 
 export default {
   data() {
@@ -57,7 +70,11 @@ export default {
         { label: '成交量', value: 'volume' },
         { label: '涨跌幅', value: 'change' },
         { label: '最新价', value: 'price' }
-      ]
+      ],
+      ws: null,
+      lastUpdateTime: null,
+      updateDelay: null,
+      updateInterval: null
     }
   },
   computed: {
@@ -89,10 +106,30 @@ export default {
     }
   },
   onLoad() {
-    this.loadMarketData();
+    this.ws = new BinanceWebSocket();
+    this.ws.connect();
+    this.ws.subscribeAllTickers(this.updateMarketData);
+    this.loadInitialData();
+    
+    // 添加更新延迟计算
+    this.updateInterval = setInterval(() => {
+      if (this.lastUpdateTime) {
+        const now = Date.now();
+        const delay = now - this.lastUpdateTime;
+        this.updateDelay = (delay / 1000).toFixed(1);
+      }
+    }, 100);
+  },
+  onUnload() {
+    if (this.ws) {
+      this.ws.close();
+    }
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+    }
   },
   methods: {
-    async loadMarketData() {
+    async loadInitialData() {
       try {
         this.loading = true;
         const response = await binanceApi.get24hrTicker();
@@ -106,6 +143,35 @@ export default {
       } finally {
         this.loading = false;
       }
+    },
+    
+    updateMarketData(data) {
+      this.lastUpdateTime = Date.now();
+      
+      // 使用 Map 优化查找效率
+      const marketMap = new Map(this.marketList.map(item => [item.symbol, item]));
+      
+      data.forEach(ticker => {
+        if (ticker.s.endsWith('USDT')) {
+          const existingItem = marketMap.get(ticker.s);
+          if (existingItem) {
+            // 更新现有数据
+            Object.assign(existingItem, {
+              lastPrice: ticker.c,
+              priceChange: ticker.p,
+              priceChangePercent: ticker.P,
+              volume: ticker.v,
+              highPrice: ticker.h,
+              lowPrice: ticker.l,
+              priceUp: parseFloat(ticker.c) > parseFloat(existingItem.prevPrice || ticker.c),
+              prevPrice: ticker.c
+            });
+          }
+        }
+      });
+      
+      // 触发视图更新
+      this.marketList = Array.from(marketMap.values());
     },
     
     onSearch() {
@@ -128,20 +194,15 @@ export default {
     },
     
     formatPrice(price) {
-      return parseFloat(price).toFixed(2);
+      return formatter.formatPrice(price);
     },
     
     formatChange(change) {
-      return parseFloat(change).toFixed(2);
+      return formatter.formatChange(change);
     },
     
     formatVolume(volume) {
-      if (volume > 1000000) {
-        return (volume / 1000000).toFixed(2) + 'M';
-      } else if (volume > 1000) {
-        return (volume / 1000).toFixed(2) + 'K';
-      }
-      return volume;
+      return formatter.formatVolume(volume);
     },
     
     loadMore() {
@@ -225,5 +286,45 @@ export default {
   text-align: center;
   padding: 20rpx;
   color: #999;
+}
+
+.update-info {
+  position: absolute;
+  top: 10rpx;
+  right: 10rpx;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  padding: 4rpx 10rpx;
+  border-radius: 4rpx;
+  font-size: 24rpx;
+  z-index: 999;
+}
+
+.price-up {
+  animation: priceUp 0.5s ease-out;
+  background: rgba(0,184,151,0.1);
+}
+
+.price-down {
+  animation: priceDown 0.5s ease-out;
+  background: rgba(255,78,63,0.1);
+}
+
+@keyframes priceUp {
+  from {
+    background: rgba(0,184,151,0.3);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@keyframes priceDown {
+  from {
+    background: rgba(255,78,63,0.3);
+  }
+  to {
+    background: transparent;
+  }
 }
 </style> 

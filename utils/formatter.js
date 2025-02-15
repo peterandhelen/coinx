@@ -1,20 +1,47 @@
 export default {
   // 智能格式化价格
-  formatPrice(price) {
+  formatPrice(price, precision = null) {
+    if (!price) return '0.00';
     const num = parseFloat(price);
-    if (num < 0.00001) {
-      return num.toExponential(4);
-    } else if (num < 0.0001) {
+    
+    // 如果指定了精度，直接使用
+    if (precision !== null) {
+      return num.toFixed(precision);
+    }
+    
+    // 根据价格范围自动判断精度
+    if (num < 0.000000001) { // 9位小数
+      return num.toExponential(8);
+    } else if (num < 0.00001) { // 5位小数
+      return num.toFixed(10);
+    } else if (num < 0.0001) { // 4位小数
       return num.toFixed(8);
-    } else if (num < 0.01) {
+    } else if (num < 0.001) { // 3位小数
+      return num.toFixed(7);
+    } else if (num < 0.01) { // 2位小数
       return num.toFixed(6);
-    } else if (num < 1) {
+    } else if (num < 0.1) { // 1位小数
+      return num.toFixed(5);
+    } else if (num < 1) { // 整数
       return num.toFixed(4);
     } else if (num < 10) {
       return num.toFixed(3);
-    } else {
+    } else if (num < 100) {
       return num.toFixed(2);
+    } else {
+      // 大数字使用千分位分隔
+      return num.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
     }
+  },
+
+  // 格式化涨跌幅
+  formatChange(change) {
+    const num = parseFloat(change);
+    const sign = num >= 0 ? '+' : '';
+    return sign + num.toFixed(2);
   },
 
   // 格式化成交量
