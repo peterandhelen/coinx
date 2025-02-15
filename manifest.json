@@ -75,6 +75,15 @@
         "router": {
             "mode": "hash",
             "base": "/"
+        },
+        "sdkConfigs": {
+            "maps": {}
+        },
+        "async": {
+            "loading": "AsyncLoading",
+            "error": "AsyncError",
+            "delay": 200,
+            "timeout": 3000
         }
     }
 }

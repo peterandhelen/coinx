@@ -8,8 +8,10 @@ export default class BinanceWebSocket {
     this.handlers = new Map();
     this.pingInterval = null;
     this.pongTimeout = null;
-    this.pingTime = 3000; // 3秒发送一次心跳
-    this.pongTime = 10000; // 10秒没有响应则重连
+    this.pingTime = 1000; // 降低到1秒
+    this.pongTime = 3000; // 降低到3秒
+    this.buffer = new Map(); // 添加缓冲区
+    this.bufferTimeout = null;
   }
 
   // 连接WebSocket
@@ -105,7 +107,6 @@ export default class BinanceWebSocket {
 
   // 处理消息
   handleMessage(data) {
-    // 处理心跳响应
     if (data.type === 'pong') {
       if (this.pongTimeout) {
         clearTimeout(this.pongTimeout);
@@ -113,16 +114,38 @@ export default class BinanceWebSocket {
       }
       return;
     }
-    
-    if (data.e === 'kline') {
-      const handler = this.handlers.get(`${data.s.toLowerCase()}@kline_${data.k.i}`);
-      if (handler) handler(data.k);
-    } else if (data.e === '24hrTicker') {
-      const handler = this.handlers.get(`${data.s.toLowerCase()}@ticker`);
-      if (handler) handler(data);
-    } else if (Array.isArray(data)) {
+
+    // 使用 requestAnimationFrame 优化渲染
+    if (Array.isArray(data)) {
+      // 批量处理市场数据
       const handler = this.handlers.get('!ticker@arr');
-      if (handler) handler(data);
+      if (handler) {
+        if (this.bufferTimeout) {
+          clearTimeout(this.bufferTimeout);
+        }
+        
+        // 更新缓冲区
+        data.forEach(ticker => {
+          this.buffer.set(ticker.s, ticker);
+        });
+
+        // 使用 requestAnimationFrame 在下一帧更新
+        requestAnimationFrame(() => {
+          if (this.buffer.size > 0) {
+            handler(Array.from(this.buffer.values()));
+            this.buffer.clear();
+          }
+        });
+      }
+    } else {
+      // 单个数据直接处理
+      if (data.e === 'kline') {
+        const handler = this.handlers.get(`${data.s.toLowerCase()}@kline_${data.k.i}`);
+        if (handler) handler(data.k);
+      } else if (data.e === '24hrTicker') {
+        const handler = this.handlers.get(`${data.s.toLowerCase()}@ticker`);
+        if (handler) handler(data);
+      }
     }
   }
 

@@ -74,23 +74,29 @@ export default {
       ws: null,
       lastUpdateTime: null,
       updateDelay: null,
-      updateInterval: null
+      updateInterval: null,
+      marketMap: new Map(),
+      updateQueue: new Set(),
+      isUpdating: false
     }
   },
   computed: {
     filteredMarketList() {
+      const searchKey = this.searchKey.toLowerCase();
+      const currentSort = this.currentSort;
+      
       let list = this.marketList;
       
       // 搜索过滤
-      if (this.searchKey) {
+      if (searchKey) {
         list = list.filter(item => 
-          item.symbol.toLowerCase().includes(this.searchKey.toLowerCase())
+          item.symbol.toLowerCase().includes(searchKey)
         );
       }
       
       // 排序
-      list = [...list].sort((a, b) => {
-        switch(this.currentSort) {
+      return list.sort((a, b) => {
+        switch(currentSort) {
           case 'volume':
             return parseFloat(b.volume) - parseFloat(a.volume);
           case 'change':
@@ -101,8 +107,6 @@ export default {
             return 0;
         }
       });
-      
-      return list;
     }
   },
   onLoad() {
@@ -133,8 +137,12 @@ export default {
       try {
         this.loading = true;
         const response = await binanceApi.get24hrTicker();
-        // 只保留USDT交易对
-        this.marketList = response.filter(item => item.symbol.endsWith('USDT'));
+        // 初始化 marketMap
+        this.marketMap.clear();
+        response.filter(item => item.symbol.endsWith('USDT')).forEach(item => {
+          this.marketMap.set(item.symbol, item);
+        });
+        this.marketList = Array.from(this.marketMap.values());
       } catch (error) {
         uni.showToast({
           title: '加载数据失败',
@@ -148,12 +156,34 @@ export default {
     updateMarketData(data) {
       this.lastUpdateTime = Date.now();
       
-      // 使用 Map 优化查找效率
-      const marketMap = new Map(this.marketList.map(item => [item.symbol, item]));
-      
+      // 使用 Set 收集需要更新的数据
       data.forEach(ticker => {
         if (ticker.s.endsWith('USDT')) {
-          const existingItem = marketMap.get(ticker.s);
+          this.updateQueue.add(ticker);
+        }
+      });
+
+      // 如果没有在更新中，开始更新
+      if (!this.isUpdating) {
+        this.processUpdateQueue();
+      }
+    },
+    
+    processUpdateQueue() {
+      if (this.updateQueue.size === 0) {
+        this.isUpdating = false;
+        return;
+      }
+
+      this.isUpdating = true;
+      
+      // 使用 requestAnimationFrame 在下一帧更新
+      requestAnimationFrame(() => {
+        const updates = Array.from(this.updateQueue);
+        this.updateQueue.clear();
+
+        updates.forEach(ticker => {
+          const existingItem = this.marketMap.get(ticker.s);
           if (existingItem) {
             // 更新现有数据
             Object.assign(existingItem, {
@@ -167,11 +197,18 @@ export default {
               prevPrice: ticker.c
             });
           }
+        });
+
+        // 更新视图
+        this.marketList = Array.from(this.marketMap.values());
+        
+        // 检查是否还有待更新的数据
+        if (this.updateQueue.size > 0) {
+          this.processUpdateQueue();
+        } else {
+          this.isUpdating = false;
         }
       });
-      
-      // 触发视图更新
-      this.marketList = Array.from(marketMap.values());
     },
     
     onSearch() {

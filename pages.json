@@ -75,5 +75,8 @@
 			"^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue",
 			"^qiun-data-charts": "@qiun/ucharts/components/qiun-data-charts"
 		}
+	},
+	"usingComponents": {
+		"qiun-data-charts": "@qiun/ucharts/components/qiun-data-charts"
 	}
 }
