@@ -41,6 +41,7 @@
 <script>
 import { calculateMACD, calculateRSI } from '@/utils/klineUtils';
 import formatter from '@/utils/formatter';
+import { indicators } from '@/utils/klineUtils';
 
 export default {
   props: {
@@ -52,19 +53,21 @@ export default {
   data() {
     return {
       prediction: {
-        direction: '',
-        targetPrice: 0,
-        estimatedTime: '',
+        direction: '--',
+        targetPrice: '--',
+        estimatedTime: '--',
         probability: 0
       },
       historyAccuracy: 0,
-      signals: []
+      signals: [],
+      isAnalyzing: false
     }
   },
   watch: {
     klineData: {
       handler(newVal) {
-        if (newVal.length > 0) {
+        // 确保有足够的数据进行分析
+        if (newVal && newVal.length >= 30 && !this.isAnalyzing) {
           this.analyzeTrend();
         }
       },
@@ -73,52 +76,124 @@ export default {
   },
   methods: {
     analyzeTrend() {
-      const data = {
-        values: this.klineData
-      };
-      
-      // 计算各种技术指标
-      const macd = calculateMACD(data);
-      const rsi = calculateRSI(data);
-      
-      // 分析信号
-      const signals = this.analyzeSignals(macd, rsi, data);
-      this.signals = signals;
-      
-      // 综合分析结果
-      const prediction = this.generatePrediction(signals, data);
-      this.prediction = prediction;
-      
-      // 计算历史准确率
-      this.calculateHistoryAccuracy();
+      try {
+        if (!this.klineData || this.klineData.length < 30) return;
+        
+        // 使用新的分析工具进行预测
+        const prediction = indicators.predictTrend(this.klineData);
+        
+        // 更新预测结果
+        this.prediction = {
+          direction: prediction.direction,
+          targetPrice: prediction.targetPrice,
+          estimatedTime: prediction.timeframe,
+          probability: prediction.probability.toFixed(2)
+        };
+        
+        // 更新信号指标
+        this.signals = [
+          {
+            name: 'MACD',
+            value: prediction.signals.macd > 0 ? '看涨' : '看跌',
+            direction: prediction.signals.macd > 0 ? 'up' : 'down'
+          },
+          {
+            name: 'RSI',
+            value: prediction.signals.rsi > 0 ? '超卖' : 
+                   prediction.signals.rsi < 0 ? '超买' : '中性',
+            direction: prediction.signals.rsi > 0 ? 'up' : 
+                      prediction.signals.rsi < 0 ? 'down' : 'neutral'
+          },
+          {
+            name: 'BOLL',
+            value: prediction.signals.boll > 0 ? '突破下轨' : 
+                   prediction.signals.boll < 0 ? '突破上轨' : '区间内',
+            direction: prediction.signals.boll > 0 ? 'up' : 
+                      prediction.signals.boll < 0 ? 'down' : 'neutral'
+          },
+          {
+            name: '趋势强度',
+            value: prediction.signals.trend > 0 ? '强势上涨' : 
+                   prediction.signals.trend < 0 ? '强势下跌' : '震荡',
+            direction: prediction.signals.trend > 0 ? 'up' : 
+                      prediction.signals.trend < 0 ? 'down' : 'neutral'
+          }
+        ];
+        
+      } catch (error) {
+        console.error('Error analyzing trend:', error);
+      }
     },
-    
-    analyzeSignals(macd, rsi, data) {
-      const signals = [];
-      const currentPrice = parseFloat(data.values[data.values.length - 1][4]);
-      
-      // MACD信号
-      const macdSignal = {
-        name: 'MACD',
-        value: macd.macd[macd.macd.length - 1] > 0 ? '看涨' : '看跌',
-        direction: macd.macd[macd.macd.length - 1] > 0 ? 'up' : 'down',
-        weight: 0.3
-      };
-      signals.push(macdSignal);
-      
-      // RSI信号
-      const lastRSI = rsi[rsi.length - 1];
-      const rsiSignal = {
-        name: 'RSI',
-        value: lastRSI > 70 ? '超买' : lastRSI < 30 ? '超卖' : '中性',
-        direction: lastRSI > 70 ? 'down' : lastRSI < 30 ? 'up' : 'neutral',
-        weight: 0.3
-      };
-      signals.push(rsiSignal);
-      
-      return signals;
+
+    calculateMACD(prices) {
+      try {
+        const shortPeriod = 12;
+        const longPeriod = 26;
+        const signalPeriod = 9;
+
+        if (prices.length < Math.max(shortPeriod, longPeriod, signalPeriod)) {
+          return { dif: [], dea: [], macd: [] };
+        }
+
+        return calculateMACD(prices, shortPeriod, longPeriod, signalPeriod);
+      } catch (error) {
+        console.error('Error calculating MACD:', error);
+        return { dif: [], dea: [], macd: [] };
+      }
     },
-    
+
+    calculateRSI(prices) {
+      try {
+        const period = 14;
+        if (prices.length < period) {
+          return [];
+        }
+
+        return calculateRSI(prices, period);
+      } catch (error) {
+        console.error('Error calculating RSI:', error);
+        return [];
+      }
+    },
+
+    analyzeSignals(macd, rsi, prices) {
+      try {
+        if (!macd.macd.length || !rsi.length || !prices.length) {
+          return [];
+        }
+
+        const signals = [];
+        const currentPrice = prices[prices.length - 1];
+
+        // MACD信号
+        if (macd.macd.length > 0) {
+          const macdValue = macd.macd[macd.macd.length - 1];
+          signals.push({
+            name: 'MACD',
+            value: macdValue > 0 ? '看涨' : '看跌',
+            direction: macdValue > 0 ? 'up' : 'down',
+            weight: 0.3
+          });
+        }
+
+        // RSI信号
+        if (rsi.length > 0) {
+          const lastRSI = rsi[rsi.length - 1];
+          signals.push({
+            name: 'RSI',
+            value: lastRSI > 70 ? '超买' : lastRSI < 30 ? '超卖' : '中性',
+            direction: lastRSI > 70 ? 'down' : lastRSI < 30 ? 'up' : 'neutral',
+            weight: 0.3
+          });
+        }
+
+        return signals;
+      } catch (error) {
+        console.error('Error analyzing signals:', error);
+        return [];
+      }
+    },
+
     generatePrediction(signals, data) {
       let bullishWeight = 0;
       let bearishWeight = 0;
@@ -131,7 +206,7 @@ export default {
         }
       });
       
-      const currentPrice = parseFloat(data.values[data.values.length - 1][4]);
+      const currentPrice = parseFloat(data[data.length - 1]);
       const volatility = this.calculateVolatility(data);
       
       const prediction = {
@@ -146,7 +221,7 @@ export default {
     
     calculateVolatility(data) {
       // 计算价格波动率
-      const prices = data.values.map(item => parseFloat(item[4]));
+      const prices = data.map(item => parseFloat(item[4]));
       let sum = 0;
       for (let i = 1; i < prices.length; i++) {
         sum += Math.abs(prices[i] - prices[i - 1]) / prices[i - 1];

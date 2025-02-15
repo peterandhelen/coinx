@@ -4,16 +4,21 @@ export default {
   // 获取K线数据
   async getKlineData(symbol, interval, limit = 500) {
     try {
-      const { data } = await uni.request({
+      const response = await uni.request({
         url: `${BASE_URL}/klines`,
         method: 'GET',
         data: {
-          symbol: symbol,
+          symbol: symbol.toUpperCase(),
           interval: interval,
           limit: limit
         }
       });
-      return data;
+      
+      if (response.statusCode === 200 && response.data) {
+        return response.data;
+      } else {
+        throw new Error('Failed to fetch kline data');
+      }
     } catch (error) {
       console.error('获取K线数据失败:', error);
       throw error;

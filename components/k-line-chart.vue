@@ -4,12 +4,22 @@
             :style="{ width: width + 'px', height: height + 'px' }"
             type="2d">
     </canvas>
+    <!-- 添加技术指标数据显示 -->
+    <view class="indicators-info">
+      <text class="price">{{currentPrice}}</text>
+      <view class="ma-values">
+        <text class="ma5">MA5: {{ma5}}</text>
+        <text class="ma10">MA10: {{ma10}}</text>
+        <text class="ma30">MA30: {{ma30}}</text>
+      </view>
+    </view>
   </view>
 </template>
 
 <script>
 import uCharts from '@qiun/ucharts';
-import { formatTime } from '@/utils/formatter.js';
+import { formatTime, formatPrice } from '@/utils/formatter.js';
+import { indicators, calculateMA } from '@/utils/klineUtils';
 
 let klineChart = null;
 
@@ -31,6 +41,10 @@ export default {
   },
   data() {
     return {
+      currentPrice: '0.00',
+      ma5: '0.00',
+      ma10: '0.00',
+      ma30: '0.00',
       opts: {
         type: 'mix',
         background: '#FFFFFF',
@@ -71,8 +85,8 @@ export default {
             },
             average: {
               show: true,
-              name: ['MA5', 'MA10', 'MA20'],
-              day: [5, 10, 20],
+              name: ['MA5', 'MA10', 'MA30'],
+              day: [5, 10, 30],
               color: ['#1890ff', '#2fc25b', '#facc14']
             }
           },
@@ -80,12 +94,15 @@ export default {
             width: 8
           }
         }
-      }
+      },
+      updateQueue: [],
+      isProcessing: false,
+      processTimer: null
     }
   },
   watch: {
     klineData: {
-      handler: 'updateChart',
+      handler: 'queueUpdate',
       deep: true
     }
   },
@@ -120,30 +137,86 @@ export default {
         });
     },
     
-    updateChart() {
-      if (!klineChart || !this.klineData.length) return;
+    queueUpdate(klineData) {
+      this.updateQueue.push(klineData);
+      if (!this.isProcessing) {
+        this.processUpdateQueue();
+      }
+    },
+    
+    async processUpdateQueue() {
+      if (this.updateQueue.length === 0) {
+        this.isProcessing = false;
+        return;
+      }
+      
+      this.isProcessing = true;
+      
+      // 批量处理更新
+      const updates = this.updateQueue.splice(0, 50);
+      
+      // 使用 requestAnimationFrame 优化渲染
+      requestAnimationFrame(() => {
+        try {
+          this.updateChart(updates);
+        } catch (error) {
+          console.error('Error updating chart:', error);
+        }
+        
+        // 继续处理队列中的其他更新
+        setTimeout(() => {
+          this.processUpdateQueue();
+        }, 16); // 约60fps
+      });
+    },
+    
+    updateChart(updates) {
+      if (!klineChart || !updates.length) return;
       
       const categories = [];
       const candleData = [];
       const volumeData = [];
+      const closePrices = [];
       
-      this.klineData.forEach(item => {
+      updates.forEach(item => {
         categories.push(formatTime(item[0]));
-        candleData.push([
-          parseFloat(item[1]), // 开盘价
-          parseFloat(item[4]), // 收盘价
-          parseFloat(item[3]), // 最低价
-          parseFloat(item[2])  // 最高价
-        ]);
-        volumeData.push(parseFloat(item[5]));
+        const [timestamp, open, high, low, close, volume] = item.map(parseFloat);
+        
+        candleData.push([open, close, low, high]);
+        volumeData.push(volume);
+        closePrices.push(close);
       });
       
+      // 计算移动平均线
+      const ma5Data = calculateMA(5, closePrices);
+      const ma10Data = calculateMA(10, closePrices);
+      const ma30Data = calculateMA(30, closePrices);
+      
+      // 更新当前价格和均线数据
+      const lastIndex = closePrices.length - 1;
+      this.currentPrice = formatPrice(closePrices[lastIndex]);
+      this.ma5 = formatPrice(ma5Data[lastIndex]);
+      this.ma10 = formatPrice(ma10Data[lastIndex]);
+      this.ma30 = formatPrice(ma30Data[lastIndex]);
+      
       const config = {
-        categories: categories,
+        categories,
         series: [{
           name: 'K线',
           type: 'candle',
           data: candleData
+        }, {
+          name: 'MA5',
+          type: 'line',
+          data: ma5Data
+        }, {
+          name: 'MA10',
+          type: 'line',
+          data: ma10Data
+        }, {
+          name: 'MA30',
+          type: 'line',
+          data: ma30Data
         }, {
           name: '成交量',
           type: 'column',
@@ -163,5 +236,33 @@ export default {
   width: 100%;
   height: 100%;
   background: #fff;
+  position: relative;
 }
+
+.indicators-info {
+  position: absolute;
+  top: 10rpx;
+  left: 10rpx;
+  background: rgba(0,0,0,0.7);
+  padding: 10rpx;
+  border-radius: 4rpx;
+  color: #fff;
+}
+
+.price {
+  font-size: 32rpx;
+  font-weight: bold;
+  display: block;
+  margin-bottom: 10rpx;
+}
+
+.ma-values {
+  display: flex;
+  gap: 20rpx;
+  font-size: 24rpx;
+}
+
+.ma5 { color: #1890ff; }
+.ma10 { color: #2fc25b; }
+.ma30 { color: #facc14; }
 </style> 
